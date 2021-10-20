@@ -327,20 +327,8 @@ class YoLov5TRT(object):
             boxes: output after nms with the shape (x1, y1, x2, y2, conf, cls_id)
         """
         # Get the boxes that score > CONF_THRESH
-        '''
-	conf_th_list = [0.5, 0.5, 0.2, 0.5, 0.3, 0.5, 0.5, 0.5, 0.2]
-        filtered_predicts = []
-        for pred in prediction:
-            conf_th = conf_th_list[int(pred[-1])]
-            if pred[-2] >= conf_th:
-                filtered_predicts.append(pred)
-        boxes = np.array(filtered_predicts)
-        if boxes.shape[0] == 0:
-            boxes = np.array([[]])
-        '''
         boxes = prediction[prediction[:, 4] >= conf_thres]
-        print(boxes)
-        print()
+        
         # Trandform bbox from [center_x, center_y, w, h] to [x1, y1, x2, y2]
         boxes[:, :4] = self.xywh2xyxy(origin_h, origin_w, boxes[:, :4])
         # clip the coordinates
@@ -423,16 +411,10 @@ class YoLov5TRT(object):
         pred = np.reshape(output[1:], (-1, 6))[:num, :]
         # Do nms
         boxes = self.non_max_suppression(pred, origin_h, origin_w, conf_thres=CONF_THRESH, nms_thres=IOU_THRESHOLD)
-        print('boxes after nms')
-        print(boxes)
-        print()
-        boxes = self.predicts_to_multilabel_numpy(boxes, iou_th=80)
-        print('boxes after merger')
-        print(boxes)
-        print()
         result_boxes = boxes[:, :4] if len(boxes) else np.array([])
-        result_classid = boxes[:, 4:] if len(boxes) else np.array([])
-        return result_boxes, result_classid
+        result_scores = boxes[:, 4] if len(boxes) else np.array([])
+        result_classid = boxes[:, 5] if len(boxes) else np.array([])
+        return result_boxes, result_scores, result_classid
 
 
 class inferThread(threading.Thread):
@@ -466,7 +448,6 @@ class warmUpThread(threading.Thread):
 if __name__ == "__main__":
     # load custom plugin and engine
     PLUGIN_LIBRARY = "/app/tensorrtx/yolov5/build/libmyplugins.so"
-    #engine_file_path = "build/yolov5s.engine"
     engine_file_path = "build/best_adam.trt"
     print(PLUGIN_LIBRARY)
     if len(sys.argv) > 1:
