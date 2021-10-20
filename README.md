@@ -6,6 +6,10 @@
    ```
    aws s3 cp s3://training-results/ppe_multilabel/yolo_v5/best_adam.pt .
    ```
+   Install requirements.txt with
+   ```
+   pip install -r requirements.txt
+   ```
 4. Create wts file with 
    ```
    python3 gen_wts.py -w best_adam.pt -o best_adam.wts
