@@ -1,14 +1,10 @@
 # yolov5_tensorrtx
-1. git clone https://github.com/everguard-inc/yolov5_tensorrtx.git in folder with docker.
+1. git clone https://github.com/everguard-inc/yolov5_tensorrtx.git in eg/vsc-pipeline.
 2. cd yolov5_tensorrtx  
    Then git clone https://github.com/everguard-inc/yolov_5_multilabel.git
 3. cd yolov_5_multilabel and download best weights with 
    ```
    aws s3 cp s3://training-results/ppe_multilabel/yolo_v5/best_adam.pt .
-   ```
-   Install requirements.txt with
-   ```
-   pip install -r requirements.txt
    ```
 4. Create wts file with 
    ```
