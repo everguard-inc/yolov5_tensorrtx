@@ -49,5 +49,5 @@ In yolov5_trt.py you already have trt-model path, path to folder with images:
   engine_file_path = "build/best_adam.trt"
   image_dir = "build/coco_calib/"
   ```
-
+Inference was tested on kyiv-jetson and in eg/vsc-pipeline docker
    
