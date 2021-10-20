@@ -16,7 +16,7 @@ aws s3 cp s3://training-results/ppe_multilabel/yolo_v5/best_adam.pt .
    1. cmake ..
    2. make
    3. ./yolov5 -s best_adam.wts best_adam.trt m
-Finally you should get best_adam.trt in build folder.
+\Finally you should get best_adam.trt in build folder.
 8. To run inference on images:
   python3 yolov5_trt.py
 In yolov5_trt.py you already have trt-model path, path to folder with images:
