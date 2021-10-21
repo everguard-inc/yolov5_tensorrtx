@@ -14,7 +14,7 @@ import pycuda.autoinit
 import pycuda.driver as cuda
 import tensorrt as trt
 
-CONF_THRESH = 0.01
+CONF_THRESH_LIST = [0.5,0.5,0.2,0.5,0.3,0.5,0.5,0.5,0.2] 
 IOU_THRESHOLD = 0.4
 
 
@@ -32,7 +32,7 @@ def get_img_path_batches(batch_size, img_dir):
     return ret
 
 
-def plot_one_box(x, img, color=None, label=None, line_thickness=None):
+def plot_one_box(x, img, line_thickness=None, color=None, labels=None):
     """
     description: Plots one bounding box on image img,
                  this function comes from YoLov5 project.
@@ -46,27 +46,29 @@ def plot_one_box(x, img, color=None, label=None, line_thickness=None):
         no return
 
     """
+    label_names = ['in_harness', 'not_in_harness', 'harness_unrecognized', 'in_vest',\
+        'not_in_vest','vest_unrecognized','in_hardhat','not_in_hardhat','hardhat_unrecognized']
     tl = (
-        line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1
+        line_thickness or round(0.001 * (img.shape[0] + img.shape[1]) / 2) + 1
     )  # line/font thickness
     color = color or [random.randint(0, 255) for _ in range(3)]
     c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
-    cv2.rectangle(img, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
-    if label:
+    cv2.rectangle(img, c1, c2, color, thickness=tl)
+    labels_space = 0
+    for label in labels:
         tf = max(tl - 1, 1)  # font thickness
-        t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
+        t_size = cv2.getTextSize(label_names[label], 0, fontScale=tl / 6, thickness=tf)[0]
         c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
-        cv2.rectangle(img, c1, c2, color, -1, cv2.LINE_AA)  # filled
         cv2.putText(
             img,
-            label,
-            (c1[0], c1[1] - 2),
+            label_names[label],
+            (c1[0], c1[1] - labels_space),
             0,
-            tl / 3,
-            [225, 255, 255],
+            tl / 4,
+            [255, 0, 0],
             thickness=tf,
-            lineType=cv2.LINE_AA,
-        )
+            )
+        labels_space += 20
 
 
 class YoLov5TRT(object):
@@ -167,19 +169,20 @@ class YoLov5TRT(object):
         # Do postprocess
 
         for i in range(self.batch_size):
-            result_boxes, result_scores, result_classid = self.post_process(
+            result = self.post_process(
                 output[i * 6001: (i + 1) * 6001], batch_origin_h[i], batch_origin_w[i]
             )
-            # Draw rectangles and labels on the original image
-            for j in range(len(result_boxes)):
-                box = result_boxes[j]
-                plot_one_box(
-                    box,
-                    batch_image_raw[i],
-                    label="{}:{:.2f}".format(
-                        categories[int(result_classid[j])], result_scores[j]
-                    ),
-                )
+            if len(result) == 0:
+                continue
+            else:
+                for j in range(len(result)):
+                    box = result[j][:4].astype(int)
+                    labels = result[j][4:].astype(int)
+                    plot_one_box(
+                        box,
+                        batch_image_raw[i],
+                        labels=labels
+                        )
         return batch_image_raw, end - start
 
     def destroy(self):
@@ -313,7 +316,14 @@ class YoLov5TRT(object):
 
         return iou
 
-    def non_max_suppression(self, prediction, origin_h, origin_w, conf_thres=0.5, nms_thres=0.4):
+    def non_max_suppression(
+        self, 
+        prediction, 
+        origin_h, 
+        origin_w, 
+        conf_thres_list = [0.5,0.5,0.2,0.5,0.3,0.5,0.5,0.5,0.2], 
+        nms_thres=0.4
+        ):
         """
         description: Removes detections with lower object confidence score than 'conf_thres' and performs
         Non-Maximum Suppression to further filter detections.
@@ -326,9 +336,14 @@ class YoLov5TRT(object):
         return:
             boxes: output after nms with the shape (x1, y1, x2, y2, conf, cls_id)
         """
-        # Get the boxes that score > CONF_THRESH
-        boxes = prediction[prediction[:, 4] >= conf_thres]
-        
+        boxes = []
+        for pred in prediction:
+            conf_th = conf_thres_list[int(pred[-1])]
+            if pred[-2]>=conf_th:
+                boxes.append(pred)
+        boxes = np.array(boxes)
+        if boxes.shape[0] == 0:
+            boxes = np.reshape(boxes, (0,6))
         # Trandform bbox from [center_x, center_y, w, h] to [x1, y1, x2, y2]
         boxes[:, :4] = self.xywh2xyxy(origin_h, origin_w, boxes[:, :4])
         # clip the coordinates
@@ -366,12 +381,12 @@ class YoLov5TRT(object):
                            + (bb_gt[..., 2] - bb_gt[..., 0]) * (bb_gt[..., 3] - bb_gt[..., 1]) - wh)
         return iou_matrix
 
-    def predicts_to_multilabel_numpy(self, predicts : np.ndarray, iou_th : float):
+    def predicts_to_multilabel_numpy(self, predicts : np.ndarray, iou_th_merge : float = 0.6):
         if len(predicts) == 0:
-            return []
+            return np.array([])
         iou_matrix = self.iou_batch_numpy(predicts, predicts)
         iou_matrix = np.triu(iou_matrix, 1)
-        matched_indices = np.c_[(iou_matrix > iou_th).nonzero()]
+        matched_indices = np.c_[(iou_matrix > iou_th_merge).nonzero()]
         new_matched_indices = []
         unique = np.array([])
         for ids in range(len(matched_indices)):
@@ -390,7 +405,7 @@ class YoLov5TRT(object):
         for ids in new_matched_indices:
             new_pr = predicts[ids]
             new_pr = np.concatenate((new_pr[0][:4], new_pr[:, 5]))
-            new_predicts.append(np.expand_dims(new_pr, 0))
+            new_predicts.append(new_pr)
         return new_predicts
 
     def post_process(self, output, origin_h, origin_w):
@@ -410,11 +425,9 @@ class YoLov5TRT(object):
         # Reshape to a two dimentional ndarray
         pred = np.reshape(output[1:], (-1, 6))[:num, :]
         # Do nms
-        boxes = self.non_max_suppression(pred, origin_h, origin_w, conf_thres=CONF_THRESH, nms_thres=IOU_THRESHOLD)
-        result_boxes = boxes[:, :4] if len(boxes) else np.array([])
-        result_scores = boxes[:, 4] if len(boxes) else np.array([])
-        result_classid = boxes[:, 5] if len(boxes) else np.array([])
-        return result_boxes, result_scores, result_classid
+        boxes = self.non_max_suppression(pred, origin_h, origin_w, conf_thres_list=CONF_THRESH_LIST, nms_thres=IOU_THRESHOLD)
+        result = self.predicts_to_multilabel_numpy(boxes)
+        return result
 
 
 class inferThread(threading.Thread):
@@ -449,13 +462,11 @@ if __name__ == "__main__":
     # load custom plugin and engine
     PLUGIN_LIBRARY = "/app/tensorrtx/yolov5/build/libmyplugins.so"
     engine_file_path = "build/best_adam.trt"
-    print(PLUGIN_LIBRARY)
     if len(sys.argv) > 1:
         engine_file_path = sys.argv[1]
     if len(sys.argv) > 2:
         PLUGIN_LIBRARY = sys.argv[2]
 
-    print(PLUGIN_LIBRARY)
     ctypes.CDLL(PLUGIN_LIBRARY)
 
     # load coco labels
@@ -472,7 +483,7 @@ if __name__ == "__main__":
         print('batch size is', yolov5_wrapper.batch_size)
 
         #image_dir = "samples/"
-        image_dir = "build/coco_calib/"
+        image_dir = "test_images/"
         image_path_batches = get_img_path_batches(yolov5_wrapper.batch_size, image_dir)
 
         for i in range(10):
