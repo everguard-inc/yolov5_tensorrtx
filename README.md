@@ -42,6 +42,16 @@ In yolov5_trt.py you already have trt-model path, path to folder with images:
   engine_file_path = "build/best_adam.trt"
   image_dir = "build/coco_calib/"
   ```
+
+If you get an error of missing pycuda:
+ ```
+ wget https://files.pythonhosted.org/packages/5a/56/4682a5118a234d15aa1c8768a528aac4858c7b04d2674e18d586d3dfda04/pycuda-2021.1.tar.gz
+ tar xfz pycuda-2021.1.tar.gz
+ cd pycuda-2021.1
+ python configure.py --cuda-root=/usr/local/cuda (your path to cuda)
+ su -c "make install"
+ ```
+
 P.S.\
 Inference was tested on kyiv-jetson and in eg/vsc-pipeline docker
    
