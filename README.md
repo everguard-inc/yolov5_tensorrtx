@@ -6,9 +6,19 @@
    mkdir build
    cd build
    ```
-   download best weights wts format with 
+   download best weights wts format for 10 classes: 
+   * in_harness
+   * not_in_harness 
+   * harness_unrecognized
+   * in_vest
+   * not_in_vest 
+   * vest_unrecognized
+   * in_hardhat
+   * not_in_hardhat
+   * hardhat_unrecognized
+   * crane_bucket
    ```
-   aws s3 cp s3://training-results/ppe_multilabel/yolo_v5/best_adam.wts .
+   aws s3 cp s3://eg-ukraine-team/rodion/crane_buckets/cl10_bucket.wts .
    ```
 
 4. in build folder:
