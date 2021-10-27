@@ -14,7 +14,7 @@ import pycuda.autoinit
 import pycuda.driver as cuda
 import tensorrt as trt
 
-CONF_THRESH_LIST = [0.5,0.5,0.2,0.5,0.3,0.5,0.5,0.5,0.2] 
+CONF_THRESH_LIST = [0.5,0.5,0.2,0.5,0.3,0.5,0.5,0.5,0.2,0.5] 
 IOU_THRESHOLD = 0.4
 
 
@@ -321,7 +321,7 @@ class YoLov5TRT(object):
         prediction, 
         origin_h, 
         origin_w, 
-        conf_thres_list = [0.5,0.5,0.2,0.5,0.3,0.5,0.5,0.5,0.2], 
+        conf_thres_list = [0.5,0.5,0.2,0.5,0.3,0.5,0.5,0.5,0.2,0.5], 
         nms_thres=0.4
         ):
         """
@@ -381,31 +381,43 @@ class YoLov5TRT(object):
                            + (bb_gt[..., 2] - bb_gt[..., 0]) * (bb_gt[..., 3] - bb_gt[..., 1]) - wh)
         return iou_matrix
 
-    def predicts_to_multilabel_numpy(self, predicts : np.ndarray, iou_th_merge : float = 0.6):
-        if len(predicts) == 0:
-            return np.array([])
-        iou_matrix = self.iou_batch_numpy(predicts, predicts)
-        iou_matrix = np.triu(iou_matrix, 1)
-        matched_indices = np.c_[(iou_matrix > iou_th_merge).nonzero()]
+    def predicts_to_multilabel_numpy(self, predicts : np.ndarray, iou_th : float, conf_th_list, skip_label : int = 9) -> np.ndarray:
+        filtered_predicts = []
+        for pred in predicts:
+            conf_th = conf_th_list[int(pred[-1])]
+            if pred[-2]>=conf_th:
+                filtered_predicts.append(pred)
+        predicts = np.array(filtered_predicts).astype(int)
+        extra_predicts = predicts[(predicts[...,-1]==skip_label).nonzero()[0]].astype(int)
+        predicts = predicts[(predicts[...,-1]!=skip_label).nonzero()[0]].astype(int)
+        iou_matrix = self.iou_batch_numpy(predicts,predicts)
+        iou_matrix = np.triu(iou_matrix,0)
+        matched_indices = np.c_[(iou_matrix>iou_th).nonzero()]
         new_matched_indices = []
-        unique = np.array([])
-        for ids in range(len(matched_indices)):
-            if len(unique) == 0:
-                unique = np.concatenate((unique, matched_indices[ids]), 0)
+        for ids in range(len(matched_indices)-1):
+            if len(new_matched_indices)==0:
+                new_matched_indices.append(list(set(matched_indices[ids])))
             else:
-                if matched_indices[ids][0] in unique or matched_indices[ids][1] in unique:
-                    unique = np.concatenate((unique, matched_indices[ids]), 0)
-                else:
-                    new_matched_indices.append(np.unique(unique).astype(int))
-                    unique = np.array([])
-                    unique = np.concatenate((unique, matched_indices[ids]), 0)
-            if ids == len(matched_indices) - 1:
-                new_matched_indices.append(np.unique(unique).astype(int))
+                exist_flag = False
+                for exist_index, exist_el in enumerate(new_matched_indices):
+                    if matched_indices[ids][0] in exist_el or matched_indices[ids][1] in exist_el:
+                        new_unique = list(set(exist_el+list(matched_indices[ids])))
+                        new_matched_indices[exist_index] = new_unique
+                        exist_flag = True
+                        break  
+                if not exist_flag:
+                    new_matched_indices.append(list(set(matched_indices[ids])))
         new_predicts = []
         for ids in new_matched_indices:
             new_pr = predicts[ids]
-            new_pr = np.concatenate((new_pr[0][:4], new_pr[:, 5]))
+            new_pr = np.concatenate((new_pr[0][:4],new_pr[:,5]))
             new_predicts.append(new_pr)
+        for pred in extra_predicts:
+            temp = []
+            for i,el in enumerate(pred):
+                if i!=4:
+                    temp.append(el)
+            new_predicts.append(np.array(temp))
         return new_predicts
 
     def post_process(self, output, origin_h, origin_w):
@@ -426,7 +438,7 @@ class YoLov5TRT(object):
         pred = np.reshape(output[1:], (-1, 6))[:num, :]
         # Do nms
         boxes = self.non_max_suppression(pred, origin_h, origin_w, conf_thres_list=CONF_THRESH_LIST, nms_thres=IOU_THRESHOLD)
-        result = self.predicts_to_multilabel_numpy(boxes)
+        result = self.predicts_to_multilabel_numpy(boxes,0.8,CONF_THRESH_LIST,9)
         return result
 
 
