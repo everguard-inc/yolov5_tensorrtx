@@ -12,10 +12,12 @@ import cv2
 import numpy as np
 import pycuda.autoinit
 import pycuda.driver as cuda
+import pandas as pd
 import tensorrt as trt
 
-CONF_THRESH_LIST = [0.5,0.5,0.2,0.5,0.3,0.5,0.5,0.5,0.2,0.5] 
+CONF_THRESH_LIST = [0.5,0.5,0.2,0.5,0.5,0.5,0.5,0.5,0.3,0.5]
 IOU_THRESHOLD = 0.4
+
 
 
 def get_img_path_batches(batch_size, img_dir):
@@ -32,7 +34,7 @@ def get_img_path_batches(batch_size, img_dir):
     return ret
 
 
-def plot_one_box(x, img, line_thickness=None, color=None, labels=None):
+def plot_one_box(x, img, line_thickness=None, color=(255,0,0), labels=None):
     """
     description: Plots one bounding box on image img,
                  this function comes from YoLov5 project.
@@ -44,18 +46,18 @@ def plot_one_box(x, img, line_thickness=None, color=None, labels=None):
         line_thickness: int
     return:
         no return
-
     """
     label_names = ['in_harness', 'not_in_harness', 'harness_unrecognized', 'in_vest',\
-        'not_in_vest','vest_unrecognized','in_hardhat','not_in_hardhat','hardhat_unrecognized']
+        'not_in_vest','vest_unrecognized','in_hardhat','not_in_hardhat','hardhat_unrecognized','crane_bucket']
     tl = (
         line_thickness or round(0.001 * (img.shape[0] + img.shape[1]) / 2) + 1
     )  # line/font thickness
-    color = color or [random.randint(0, 255) for _ in range(3)]
+    box_color = (255,0,0)#color or [random.randint(0, 255) for _ in range(3)]
     c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
-    cv2.rectangle(img, c1, c2, color, thickness=tl)
+    cv2.rectangle(img, c1, c2, box_color, thickness=tl)
     labels_space = 0
     for label in labels:
+        text_color = (0,255,0) if label==0 or label==3 or label==6 else (0,0,255)
         tf = max(tl - 1, 1)  # font thickness
         t_size = cv2.getTextSize(label_names[label], 0, fontScale=tl / 6, thickness=tf)[0]
         c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
@@ -65,7 +67,7 @@ def plot_one_box(x, img, line_thickness=None, color=None, labels=None):
             (c1[0], c1[1] - labels_space),
             0,
             tl / 4,
-            [255, 0, 0],
+            text_color,
             thickness=tf,
             )
         labels_space += 20
@@ -124,7 +126,7 @@ class YoLov5TRT(object):
         self.bindings = bindings
         self.batch_size = engine.max_batch_size
 
-    def infer(self, raw_image_generator):
+    def infer(self, image_raw):
         threading.Thread.__init__(self)
         # Make self the active context, pushing it on top of the context stack.
         self.ctx.push()
@@ -142,12 +144,11 @@ class YoLov5TRT(object):
         batch_origin_h = []
         batch_origin_w = []
         batch_input_image = np.empty(shape=[self.batch_size, 3, self.input_h, self.input_w])
-        for i, image_raw in enumerate(raw_image_generator):
-            input_image, image_raw, origin_h, origin_w = self.preprocess_image(image_raw)
-            batch_image_raw.append(image_raw)
-            batch_origin_h.append(origin_h)
-            batch_origin_w.append(origin_w)
-            np.copyto(batch_input_image[i], input_image)
+        input_image, image_raw, origin_h, origin_w = self.preprocess_image(image_raw)
+        batch_image_raw.append(image_raw)
+        batch_origin_h.append(origin_h)
+        batch_origin_w.append(origin_w)
+        np.copyto(batch_input_image[0], input_image)
         batch_input_image = np.ascontiguousarray(batch_input_image)
 
         # Copy input image to host buffer
@@ -167,6 +168,7 @@ class YoLov5TRT(object):
         # Here we use the first row of output in that batch_size = 1
         output = host_outputs[0]
         # Do postprocess
+        labels = []
 
         for i in range(self.batch_size):
             result = self.post_process(
@@ -183,7 +185,7 @@ class YoLov5TRT(object):
                         batch_image_raw[i],
                         labels=labels
                         )
-        return batch_image_raw, end - start
+        return batch_image_raw, end - start, labels
 
     def destroy(self):
         # Remove any context from the top of the context stack, deactivating it.
@@ -321,7 +323,7 @@ class YoLov5TRT(object):
         prediction, 
         origin_h, 
         origin_w, 
-        conf_thres_list = [0.5,0.5,0.2,0.5,0.3,0.5,0.5,0.5,0.2,0.5], 
+        conf_thres_list = [0.5,0.5,0.2,0.5,0.5,0.5,0.5,0.5,0.3,0.5], 
         nms_thres=0.4
         ):
         """
@@ -381,44 +383,47 @@ class YoLov5TRT(object):
                            + (bb_gt[..., 2] - bb_gt[..., 0]) * (bb_gt[..., 3] - bb_gt[..., 1]) - wh)
         return iou_matrix
 
-    def predicts_to_multilabel_numpy(self, predicts : np.ndarray, iou_th : float, conf_th_list, skip_label : int = 9) -> np.ndarray:
-        filtered_predicts = []
-        for pred in predicts:
-            conf_th = conf_th_list[int(pred[-1])]
-            if pred[-2]>=conf_th:
-                filtered_predicts.append(pred)
-        predicts = np.array(filtered_predicts).astype(int)
-        extra_predicts = predicts[(predicts[...,-1]==skip_label).nonzero()[0]].astype(int)
-        predicts = predicts[(predicts[...,-1]!=skip_label).nonzero()[0]].astype(int)
-        iou_matrix = self.iou_batch_numpy(predicts,predicts)
-        iou_matrix = np.triu(iou_matrix,0)
-        matched_indices = np.c_[(iou_matrix>iou_th).nonzero()]
-        new_matched_indices = []
-        for ids in range(len(matched_indices)-1):
-            if len(new_matched_indices)==0:
-                new_matched_indices.append(list(set(matched_indices[ids])))
-            else:
-                exist_flag = False
-                for exist_index, exist_el in enumerate(new_matched_indices):
-                    if matched_indices[ids][0] in exist_el or matched_indices[ids][1] in exist_el:
-                        new_unique = list(set(exist_el+list(matched_indices[ids])))
-                        new_matched_indices[exist_index] = new_unique
-                        exist_flag = True
-                        break  
-                if not exist_flag:
+    def predicts_to_multilabel_numpy(self, predicts : np.ndarray, iou_th : float, conf_th_list, skip_label : int = 0) -> np.ndarray:
+        if len(predicts) == 0:
+            return []
+        else:
+            filtered_predicts = []
+            for pred in predicts:
+                conf_th = conf_th_list[int(pred[-1])]
+                if pred[-2]>=conf_th:
+                    filtered_predicts.append(pred)
+            predicts = np.array(filtered_predicts).astype(int)
+            extra_predicts = predicts[(predicts[...,-1]==skip_label).nonzero()[0]].astype(int)
+            predicts = predicts[(predicts[...,-1]!=skip_label).nonzero()[0]].astype(int)
+            iou_matrix = self.iou_batch_numpy(predicts,predicts)
+            iou_matrix = np.triu(iou_matrix,0)
+            matched_indices = np.c_[(iou_matrix>iou_th).nonzero()]
+            new_matched_indices = []
+            for ids in range(len(matched_indices)-1):
+                if len(new_matched_indices)==0:
                     new_matched_indices.append(list(set(matched_indices[ids])))
-        new_predicts = []
-        for ids in new_matched_indices:
-            new_pr = predicts[ids]
-            new_pr = np.concatenate((new_pr[0][:4],new_pr[:,5]))
-            new_predicts.append(new_pr)
-        for pred in extra_predicts:
-            temp = []
-            for i,el in enumerate(pred):
-                if i!=4:
-                    temp.append(el)
-            new_predicts.append(np.array(temp))
-        return new_predicts
+                else:
+                    exist_flag = False
+                    for exist_index, exist_el in enumerate(new_matched_indices):
+                        if matched_indices[ids][0] in exist_el or matched_indices[ids][1] in exist_el:
+                            new_unique = list(set(exist_el+list(matched_indices[ids])))
+                            new_matched_indices[exist_index] = new_unique
+                            exist_flag = True
+                            break  
+                    if not exist_flag:
+                        new_matched_indices.append(list(set(matched_indices[ids])))
+            new_predicts = []
+            for ids in new_matched_indices:
+                new_pr = predicts[ids]
+                new_pr = np.concatenate((new_pr[0][:4],new_pr[:,5]))
+                new_predicts.append(new_pr)
+            for pred in extra_predicts:
+                temp = []
+                for i,el in enumerate(pred):
+                    if i!=4:
+                        temp.append(el)
+                new_predicts.append(np.array(temp))
+            return new_predicts
 
     def post_process(self, output, origin_h, origin_w):
         """
@@ -438,7 +443,7 @@ class YoLov5TRT(object):
         pred = np.reshape(output[1:], (-1, 6))[:num, :]
         # Do nms
         boxes = self.non_max_suppression(pred, origin_h, origin_w, conf_thres_list=CONF_THRESH_LIST, nms_thres=IOU_THRESHOLD)
-        result = self.predicts_to_multilabel_numpy(boxes,0.8,CONF_THRESH_LIST,9)
+        result = self.predicts_to_multilabel_numpy(boxes, IOU_THRESHOLD, CONF_THRESH_LIST, 9)
         return result
 
 
@@ -451,12 +456,12 @@ class inferThread(threading.Thread):
     def run(self):
         batch_image_raw, use_time = self.yolov5_wrapper.infer(self.yolov5_wrapper.get_raw_image(self.image_path_batch))
         time_file = open("time.txt", "a")
-        time_file.write(f'{use_time}\n')
+        #time_file.write(f'{use_time}\n')
         for i, img_path in enumerate(self.image_path_batch):
             parent, filename = os.path.split(img_path)
             save_name = os.path.join('output', filename)
             # Save image
-            cv2.imwrite(save_name, batch_image_raw[i])
+            #cv2.imwrite(save_name, batch_image_raw[i])
         print('input->{}, time->{:.2f}ms, saving into output/'.format(self.image_path_batch, use_time * 1000))
 
 
@@ -467,13 +472,12 @@ class warmUpThread(threading.Thread):
 
     def run(self):
         batch_image_raw, use_time = self.yolov5_wrapper.infer(self.yolov5_wrapper.get_raw_image_zeros())
-        print('warm_up->{}, time->{:.2f}ms'.format(batch_image_raw[0].shape, use_time * 1000))
 
 
 if __name__ == "__main__":
     # load custom plugin and engine
     PLUGIN_LIBRARY = "/app/tensorrtx/yolov5/build/libmyplugins.so"
-    engine_file_path = "build/best_adam.trt"
+    engine_file_path = "build/cl10_bucket.trt"
     if len(sys.argv) > 1:
         engine_file_path = sys.argv[1]
     if len(sys.argv) > 2:
@@ -484,30 +488,30 @@ if __name__ == "__main__":
     # load coco labels
 
     categories = ['in_harness', 'not_in_harness', 'harness_unrecognized', 'in_vest', 'not_in_vest', 'vest_unrecognized',
-                  'in_hardhat', 'not_in_hardhat', 'hardhat_unrecognized']
-
-    if os.path.exists('output/'):
-        shutil.rmtree('output/')
-    os.makedirs('output/')
+                  'in_hardhat', 'not_in_hardhat', 'hardhat_unrecognized','crane_bucket']
     # a YoLov5TRT instance
     yolov5_wrapper = YoLov5TRT(engine_file_path)
     try:
-        print('batch size is', yolov5_wrapper.batch_size)
+        videos = os.listdir("test_videos/")
+        for video in videos:
+                print(video)
+                vidcap = cv2.VideoCapture("test_videos/" + video)
+                img_array = []
+                success,image = vidcap.read()
+                frame = 1
+                while success:
+                    print(frame)
+                    frame+=1
+                    batch_image_raw, use_time, labels = yolov5_wrapper.infer(image) 
+                    height, width, layers = image.shape
+                    size = (width,height)
+                    img_array.append(image)
+                    success,image = vidcap.read()
+                out = cv2.VideoWriter("test_out/" + video ,cv2.VideoWriter_fourcc(*'mp4v'), 5, size)
+                for i in range(len(img_array)):
+                    out.write(img_array[i])
+                out.release()
 
-        #image_dir = "samples/"
-        image_dir = "test_images/"
-        image_path_batches = get_img_path_batches(yolov5_wrapper.batch_size, image_dir)
-
-        for i in range(10):
-            # create a new thread to do warm_up
-            thread1 = warmUpThread(yolov5_wrapper)
-            thread1.start()
-            thread1.join()
-        for batch in image_path_batches:
-            # create a new thread to do inference
-            thread1 = inferThread(yolov5_wrapper, batch)
-            thread1.start()
-            thread1.join()
     finally:
         # destroy the instance
         yolov5_wrapper.destroy()
