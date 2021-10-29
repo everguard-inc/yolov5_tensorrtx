@@ -19,6 +19,7 @@ CONF_THRESH_LIST = [0.5,0.5,0.2,0.5,0.3,0.5,0.5,0.5,0.2]
 IOU_THRESHOLD = 0.4
 
 
+
 def get_img_path_batches(batch_size, img_dir):
     ret = []
     batch = []
@@ -51,13 +52,14 @@ def plot_one_box(x, img, line_thickness=None, color=None, labels=None):
     tl = (
         line_thickness or round(0.001 * (img.shape[0] + img.shape[1]) / 2) + 1
     )  # line/font thickness
-    color = color or [random.randint(0, 255) for _ in range(3)]
     c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
-    if (4 in labels) or (7 in labels):
+    labels_space = 0
+    labels = [v for v in labels if v in needed_labels]
+    if needed_labels[1] in labels:
         cv2.rectangle(img, c1, c2, (0,0,255), thickness=tl)
     else:
         cv2.rectangle(img, c1, c2, (255,0,0), thickness=tl)
-    labels_space = 0
+            
     for label in labels:
         tf = max(tl - 1, 2)  # font thickness
         t_size = cv2.getTextSize(label_names[label], 0, fontScale=tl / 6, thickness=tf)[0]
@@ -169,7 +171,7 @@ class YoLov5TRT(object):
         # Here we use the first row of output in that batch_size = 1
         output = host_outputs[0]
         # Do postprocess
-        labels = []
+        all_labels = []
 
         for i in range(self.batch_size):
             result = self.post_process(
@@ -181,12 +183,14 @@ class YoLov5TRT(object):
                 for j in range(len(result)):
                     box = result[j][:4].astype(int)
                     labels = result[j][4:].astype(int)
+                    for label in labels:
+                        all_labels.append(label)
                     plot_one_box(
                         box,
                         batch_image_raw[i],
                         labels=labels
                         )
-        return batch_image_raw, end - start, labels
+        return batch_image_raw, end - start, all_labels
 
     def destroy(self):
         # Remove any context from the top of the context stack, deactivating it.
@@ -385,43 +389,46 @@ class YoLov5TRT(object):
         return iou_matrix
 
     def predicts_to_multilabel_numpy(self, predicts : np.ndarray, iou_th : float, conf_th_list, skip_label : int = 20) -> np.ndarray:
-        filtered_predicts = []
-        for pred in predicts:
-            conf_th = conf_th_list[int(pred[-1])]
-            if pred[-2]>=conf_th:
-                filtered_predicts.append(pred)
-        predicts = np.array(filtered_predicts).astype(int)
-        extra_predicts = predicts[(predicts[...,-1]==skip_label).nonzero()[0]].astype(int)
-        predicts = predicts[(predicts[...,-1]!=skip_label).nonzero()[0]].astype(int)
-        iou_matrix = self.iou_batch_numpy(predicts,predicts)
-        iou_matrix = np.triu(iou_matrix,0)
-        matched_indices = np.c_[(iou_matrix>iou_th).nonzero()]
-        new_matched_indices = []
-        for ids in range(len(matched_indices)-1):
-            if len(new_matched_indices)==0:
-                new_matched_indices.append(list(set(matched_indices[ids])))
-            else:
-                exist_flag = False
-                for exist_index, exist_el in enumerate(new_matched_indices):
-                    if matched_indices[ids][0] in exist_el or matched_indices[ids][1] in exist_el:
-                        new_unique = list(set(exist_el+list(matched_indices[ids])))
-                        new_matched_indices[exist_index] = new_unique
-                        exist_flag = True
-                        break  
-                if not exist_flag:
+        if len(predicts) == 0:
+            return []
+        else:
+            filtered_predicts = []
+            for pred in predicts:
+                conf_th = conf_th_list[int(pred[-1])]
+                if pred[-2]>=conf_th:
+                    filtered_predicts.append(pred)
+            predicts = np.array(filtered_predicts).astype(int)
+            extra_predicts = predicts[(predicts[...,-1]==skip_label).nonzero()[0]].astype(int)
+            predicts = predicts[(predicts[...,-1]!=skip_label).nonzero()[0]].astype(int)
+            iou_matrix = self.iou_batch_numpy(predicts,predicts)
+            iou_matrix = np.triu(iou_matrix,0)
+            matched_indices = np.c_[(iou_matrix>iou_th).nonzero()]
+            new_matched_indices = []
+            for ids in range(len(matched_indices)-1):
+                if len(new_matched_indices)==0:
                     new_matched_indices.append(list(set(matched_indices[ids])))
-        new_predicts = []
-        for ids in new_matched_indices:
-            new_pr = predicts[ids]
-            new_pr = np.concatenate((new_pr[0][:4],new_pr[:,5]))
-            new_predicts.append(new_pr)
-        for pred in extra_predicts:
-            temp = []
-            for i,el in enumerate(pred):
-                if i!=4:
-                    temp.append(el)
-            new_predicts.append(np.array(temp))
-        return new_predicts
+                else:
+                    exist_flag = False
+                    for exist_index, exist_el in enumerate(new_matched_indices):
+                        if matched_indices[ids][0] in exist_el or matched_indices[ids][1] in exist_el:
+                            new_unique = list(set(exist_el+list(matched_indices[ids])))
+                            new_matched_indices[exist_index] = new_unique
+                            exist_flag = True
+                            break  
+                    if not exist_flag:
+                        new_matched_indices.append(list(set(matched_indices[ids])))
+            new_predicts = []
+            for ids in new_matched_indices:
+                new_pr = predicts[ids]
+                new_pr = np.concatenate((new_pr[0][:4],new_pr[:,5]))
+                new_predicts.append(new_pr)
+            for pred in extra_predicts:
+                temp = []
+                for i,el in enumerate(pred):
+                    if i!=4:
+                        temp.append(el)
+                new_predicts.append(np.array(temp))
+            return new_predicts
 
     def post_process(self, output, origin_h, origin_w):
         """
@@ -441,7 +448,7 @@ class YoLov5TRT(object):
         pred = np.reshape(output[1:], (-1, 6))[:num, :]
         # Do nms
         boxes = self.non_max_suppression(pred, origin_h, origin_w, conf_thres_list=CONF_THRESH_LIST, nms_thres=IOU_THRESHOLD)
-        result = self.predicts_to_multilabel_numpy(boxes)
+        result = self.predicts_to_multilabel_numpy(boxes, IOU_THRESHOLD, CONF_THRESH_LIST)
         return result
 
 
@@ -474,8 +481,8 @@ class warmUpThread(threading.Thread):
 
 if __name__ == "__main__":
     # load custom plugin and engine
-    PLUGIN_LIBRARY = "/app/eg_pipeline/rtls_pipeline/yolov5trt/tensorrtx/yolov5/build/libmyplugins.so"
-    engine_file_path = "/app/eg_pipeline/rtls_pipeline/yolov5trt/tensorrtx/yolov5/build/best_adam.trt"
+    PLUGIN_LIBRARY = "build_old/libmyplugins.so"
+    engine_file_path = "build_old/best_adam.trt"
     if len(sys.argv) > 1:
         engine_file_path = sys.argv[1]
     if len(sys.argv) > 2:
@@ -487,39 +494,46 @@ if __name__ == "__main__":
 
     categories = ['in_harness', 'not_in_harness', 'harness_unrecognized', 'in_vest', 'not_in_vest', 'vest_unrecognized',
                   'in_hardhat', 'not_in_hardhat', 'hardhat_unrecognized']
-    if os.path.exists('output/'):
-        shutil.rmtree('output/')
-    os.makedirs('output/')
     # a YoLov5TRT instance
     yolov5_wrapper = YoLov5TRT(engine_file_path)
     df = pd.read_csv("events.csv")
+    df["Model Result"] = np.nan
+    print(df.columns)
     try:
-        videos = os.listdir("/app/eg_pipeline/rtls_pipeline/yolov5trt/tensorrtx/yolov5/events")
-        for vid in videos:
-            not_harn = 0
-            not_vest = 0
-            not_hardhat = 0
-            img_array = []
-            vidcap = cv2.VideoCapture("/app/eg_pipeline/rtls_pipeline/yolov5trt/tensorrtx/yolov5/events/" + vid)
-            success,image = vidcap.read()
-            while success:
-                batch_image_raw, use_time, labels = yolov5_wrapper.infer(image) 
-                if 1 in labels:
-                    not_harn += 1
-                if 4 in labels:
-                    not_vest += 1
-                if 7 in labels:
-                    not_hardhat += 1
-                height, width, layers = image.shape
-                size = (width,height)
-                img_array.append(image)
+        videos = os.listdir("videos_to_detect_10-27-19-20")
+        for i, event_uid in enumerate(df["Event uid"]):
+            vid = 0
+            if not pd.isna(event_uid):
+                for pr_vid in videos:
+                    if event_uid in pr_vid and ("(1)" not in pr_vid):
+                        vid = pr_vid
+                        event_type =df["Event Name"].iloc[i]
+            if vid!=0:
+                if event_type == "PPE - No Safety Vest":
+                    needed_labels = [3, 4]
+                if event_type == "PPE - No Hard Hat":
+                    needed_labels = [6, 7]
+                if event_type == "PPE - No Harness":
+                    needed_labels = [0, 1]
+                wrong_boxes =0
+                img_array = []
+                vidcap = cv2.VideoCapture("videos_to_detect_10-27-19-20/" + vid)
                 success,image = vidcap.read()
-            out = cv2.VideoWriter("/app/yolov5_tensorrtx/yolov5/events_processed" + vid,cv2.VideoWriter_fourcc(*'mp4v'), 5, size)
-            for i in range(len(img_array)):
-                out.write(img_array[i])
-            out.release()
-            print("Results for vid {}: not_harn ={}, not_vest={}, not_hardhat={}".format(vid.split("_")[1:], not_harn, not_vest,not_hardhat)) 
+                while success:
+                    batch_image_raw, use_time, labels = yolov5_wrapper.infer(image) 
+                    wrong_boxes += list(labels).count(needed_labels[1])
+                    height, width, layers = image.shape
+                    size = (width,height)
+                    img_array.append(image)
+                    success,image = vidcap.read()
+                out = cv2.VideoWriter("events_processed/" + "proc_"+vid ,cv2.VideoWriter_fourcc(*'mp4v'), 5, size)
+                df["Model Result"].iloc[i] = wrong_boxes
+                for i in range(len(img_array)):
+                    out.write(img_array[i])
+                out.release()
+                print("Results for vid {}, {}: wrong_boxes = {}".format(vid.split("_")[1:], event_type, wrong_boxes)) 
 
     finally:
+        df.to_csv("events_processed.csv", index = False)
         # destroy the instance
         yolov5_wrapper.destroy()
