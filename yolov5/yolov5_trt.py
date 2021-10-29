@@ -15,7 +15,7 @@ import pycuda.driver as cuda
 import pandas as pd
 import tensorrt as trt
 
-CONF_THRESH_LIST = [0.5,0.5,0.2,0.5,0.5,0.5,0.5,0.5,0.3,0.5]
+CONF_THRESH_LIST = [0.5, 0.7, 0.5, 0.6, 0.5, 0.5, 0.5, 0.7, 0.5, 0.5]
 IOU_THRESHOLD = 0.4
 
 
