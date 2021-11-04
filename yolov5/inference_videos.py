@@ -15,10 +15,45 @@ import pycuda.driver as cuda
 import pandas as pd
 import tensorrt as trt
 
-CONF_THRESH_LIST = [0.5, 0.7, 0.5, 0.6, 0.5, 0.5, 0.5, 0.7, 0.5]
+CONF_THRESH_LIST = [0.5,0.5,0.2,0.5,0.5,0.2,0.5,0.5,0.2,0.5] 
 
-#[0.5,0.5,0.2,0.5,0.3,0.5,0.5,0.5,0.2] 
+#[0.5, 0.7, 0.5, 0.6, 0.5, 0.5, 0.5, 0.7, 0.5, 0.5]
+
 IOU_THRESHOLD = 0.4
+
+VIDEOS = ['a3fec340-c744-413c-a53c-5798a5e28a6a',
+'f9bb3b3d-1d7c-490d-acad-1eae3b14fa0a',
+'57f81580-fff1-4aeb-b8d7-2cba06746a78',
+'a9f6f796-7c85-43d6-a950-4124ba3ca53b',
+'5b1ca434-1d5e-44f6-a172-cd40ceeff739',
+'0b02f56e-eb62-491d-9910-2027ed4a26c1',
+'49705660-1e10-44ec-92b8-62bd480183e4',
+'8cbb45b7-2101-4ec3-8f1e-4396b554afb1',
+'be7c53a5-d7b0-427a-921e-e70ef21bcd89',
+'7cc7e955-2b13-48f9-9512-c8d4dc7b702b',
+'06e02090-5966-4040-a44e-71d53eb00d14',
+'d1db9f07-8673-42a6-9de8-2457f0795fe8',
+'93f9a3f4-db7e-4ef7-99e0-327ec92dd9b0',
+'123e90e5-e7c8-479f-8948-88c93aa07e7b',
+'c0ebeac5-fcaa-412a-b58c-377f7ee6b1ee',
+'b058e1c9-0da8-463d-a7e8-d648ed40b688',
+'48b118c3-d795-4d73-a8a2-bae1dfaab1f3',
+'076e3fdf-6a26-462f-b788-ed727f0faf8d',
+'14ce89fe-1072-46bc-a167-c501560121b5',
+'cab4d83a-a677-4259-a7dc-ac278ea8fac7',
+'606ab17e-2cad-44fc-9f61-e64d1dec57fe',
+'3b0645af-f26a-4200-ab1b-7d9bebe18f5b',
+'5c00a745-844e-4d35-b2c8-b56c3db73f44',
+'80d45e4e-3ddb-467c-ac09-6177ad82c792',
+'4fd79a9a-bf60-457c-a157-4bcd97980419',
+'828dca07-439e-4bca-8acc-fedbe0ef8b4a',
+'e14558ec-e799-4daa-9ad3-268633e7a32a',
+'158e4856-f448-4552-b402-575f23f76b50',
+'feb56c6a-ddf1-4007-99b5-83c450b3cbec',
+'ce58e48a-d0e1-44ec-8770-81d15106f511',
+'8f6fda8e-5523-4a43-819b-0a0d21953168',
+'66455d41-23ae-418a-a9a5-7602e205a6d6',
+'eddf5f6a-db9f-472f-89c6-a225ed25bbad']
 
 
 
@@ -50,7 +85,7 @@ def plot_one_box(x, img, line_thickness=None, color=None, labels=None):
         no return
     """
     label_names = ['in_harness', 'not_in_harness', 'harness_unrecognized', 'in_vest',\
-        'not_in_vest','vest_unrecognized','in_hardhat','not_in_hardhat','hardhat_unrecognized']
+        'not_in_vest','vest_unrecognized','in_hardhat','not_in_hardhat','hardhat_unrecognized','bucket']
     tl = (
         line_thickness or round(0.001 * (img.shape[0] + img.shape[1]) / 2) + 1
     )  # line/font thickness
@@ -330,8 +365,8 @@ class YoLov5TRT(object):
         prediction, 
         origin_h, 
         origin_w, 
-        conf_thres_list = [0.5,0.5,0.2,0.5,0.3,0.5,0.5,0.5,0.2], 
-        nms_thres=0.4
+        conf_thres_list, 
+        nms_thres
         ):
         """
         description: Removes detections with lower object confidence score than 'conf_thres' and performs
@@ -406,7 +441,7 @@ class YoLov5TRT(object):
             iou_matrix = np.triu(iou_matrix,0)
             matched_indices = np.c_[(iou_matrix>iou_th).nonzero()]
             new_matched_indices = []
-            for ids in range(len(matched_indices)-1):
+            for ids in range(len(matched_indices)):
                 if len(new_matched_indices)==0:
                     new_matched_indices.append(list(set(matched_indices[ids])))
                 else:
@@ -483,8 +518,8 @@ class warmUpThread(threading.Thread):
 
 if __name__ == "__main__":
     # load custom plugin and engine
-    PLUGIN_LIBRARY = "build_old/libmyplugins.so"
-    engine_file_path = "build_old/best_adam.trt"
+    PLUGIN_LIBRARY = "build/libmyplugins.so"
+    engine_file_path = "build/cl10_bucket.trt"
     if len(sys.argv) > 1:
         engine_file_path = sys.argv[1]
     if len(sys.argv) > 2:
@@ -495,7 +530,7 @@ if __name__ == "__main__":
     # load coco labels
 
     categories = ['in_harness', 'not_in_harness', 'harness_unrecognized', 'in_vest', 'not_in_vest', 'vest_unrecognized',
-                  'in_hardhat', 'not_in_hardhat', 'hardhat_unrecognized']
+                  'in_hardhat', 'not_in_hardhat', 'hardhat_unrecognized','bucket']
     # a YoLov5TRT instance
     yolov5_wrapper = YoLov5TRT(engine_file_path)
     df = pd.read_csv("events.csv")
@@ -528,7 +563,7 @@ if __name__ == "__main__":
                     size = (width,height)
                     img_array.append(image)
                     success,image = vidcap.read()
-                out = cv2.VideoWriter("events_processed/" + "proc_"+vid ,cv2.VideoWriter_fourcc(*'mp4v'), 5, size)
+                out = cv2.VideoWriter("10cl_events_processed_low/" + "proc_"+vid ,cv2.VideoWriter_fourcc(*'mp4v'), 5, size)
                 df["Model Result"].iloc[i] = wrong_boxes
                 for i in range(len(img_array)):
                     out.write(img_array[i])
@@ -536,6 +571,6 @@ if __name__ == "__main__":
                 print("Results for vid {}, {}: wrong_boxes = {}".format(vid.split("_")[1:], event_type, wrong_boxes)) 
 
     finally:
-        df.to_csv("events_processed.csv", index = False)
+        df.to_csv("events_processed_low.csv", index = False)
         # destroy the instance
         yolov5_wrapper.destroy()

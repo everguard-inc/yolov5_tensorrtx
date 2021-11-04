@@ -15,7 +15,7 @@ import pycuda.driver as cuda
 import pandas as pd
 import tensorrt as trt
 
-CONF_THRESH_LIST = [0.5, 0.7, 0.5, 0.6, 0.5, 0.5, 0.5, 0.7, 0.5, 0.5]
+CONF_THRESH_LIST = [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2]
 IOU_THRESHOLD = 0.4
 
 
@@ -242,6 +242,7 @@ class YoLov5TRT(object):
         image = cv2.copyMakeBorder(
             image, ty1, ty2, tx1, tx2, cv2.BORDER_CONSTANT, (128, 128, 128)
         )
+        #print(aaaa)
         image = image.astype(np.float32)
         # Normalize to [0,1]
         image /= 255.0
@@ -323,8 +324,8 @@ class YoLov5TRT(object):
         prediction, 
         origin_h, 
         origin_w, 
-        conf_thres_list = [0.5,0.5,0.2,0.5,0.5,0.5,0.5,0.5,0.3,0.5], 
-        nms_thres=0.4
+        conf_thres_list, 
+        nms_thres
         ):
         """
         description: Removes detections with lower object confidence score than 'conf_thres' and performs
@@ -393,13 +394,15 @@ class YoLov5TRT(object):
                 if pred[-2]>=conf_th:
                     filtered_predicts.append(pred)
             predicts = np.array(filtered_predicts).astype(int)
+            if len(predicts) == 0:
+                return 0
             extra_predicts = predicts[(predicts[...,-1]==skip_label).nonzero()[0]].astype(int)
             predicts = predicts[(predicts[...,-1]!=skip_label).nonzero()[0]].astype(int)
             iou_matrix = self.iou_batch_numpy(predicts,predicts)
             iou_matrix = np.triu(iou_matrix,0)
             matched_indices = np.c_[(iou_matrix>iou_th).nonzero()]
             new_matched_indices = []
-            for ids in range(len(matched_indices)-1):
+            for ids in range(len(matched_indices)):
                 if len(new_matched_indices)==0:
                     new_matched_indices.append(list(set(matched_indices[ids])))
                 else:
@@ -444,6 +447,7 @@ class YoLov5TRT(object):
         # Do nms
         boxes = self.non_max_suppression(pred, origin_h, origin_w, conf_thres_list=CONF_THRESH_LIST, nms_thres=IOU_THRESHOLD)
         result = self.predicts_to_multilabel_numpy(boxes, IOU_THRESHOLD, CONF_THRESH_LIST, 9)
+        print('result = ',result)
         return result
 
 
@@ -476,7 +480,7 @@ class warmUpThread(threading.Thread):
 
 if __name__ == "__main__":
     # load custom plugin and engine
-    PLUGIN_LIBRARY = "/app/tensorrtx/yolov5/build/libmyplugins.so"
+    PLUGIN_LIBRARY = "build/libmyplugins.so"
     engine_file_path = "build/cl10_bucket.trt"
     if len(sys.argv) > 1:
         engine_file_path = sys.argv[1]
