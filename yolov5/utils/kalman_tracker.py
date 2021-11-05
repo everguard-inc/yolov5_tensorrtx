@@ -109,7 +109,6 @@ class KFBuffer:
                 self._history['hardhat'].append(label)
             elif label in [9]:
                 self._history['crane'].append(label)
-                self._val_in_history+=1
         if self._get_history_len() == self._buffer:
             return self._choose_value()
         else:
@@ -142,6 +141,7 @@ class KalmanBoxTracker(object):
     """
     This class represents the internal state of individual tracked objects observed as bbox.
     """
+    count = 0
 
     def __init__(self, bbox, track_id):
         """
@@ -169,7 +169,8 @@ class KalmanBoxTracker(object):
 
         self.kf.x[:4] = convert_bbox_to_z(bbox)
         self.time_since_update = 0
-        self.track_id = track_id
+        self.id = KalmanBoxTracker.count
+        KalmanBoxTracker.count += 1
         self.history = []
         self.hits = 0
         self.hit_streak = 0
@@ -275,9 +276,9 @@ class KFTracker(object):
         """
         Sets key parameters for tracker
         """
-        self.max_age = 3
+        self.max_age = 1
         self.min_hits = 3
-        self.iou_threshold = 0.7
+        self.iou_threshold = 0.19
         self.trackers = []
         self.frame_count = 0
 
@@ -312,7 +313,6 @@ class KFTracker(object):
         matched, unmatched_dets, unmatched_trks = associate_detections_to_trackers(dets, trks, self.iou_threshold)
         # update matched trackers with assigned detections
         persons = []
-        #print('matched', matched)
         for m in matched:
             self.trackers[m[1]].update(dets[m[0]])
             persons.append([boxes[m[0]], self.trackers[m[1]].get_labels()])
@@ -323,6 +323,9 @@ class KFTracker(object):
             self.trackers.append(trk)
         i = len(self.trackers)
         for trk in reversed(self.trackers):
+            d = trk.get_state()[0]
+            if (trk.time_since_update < 1) and (trk.hit_streak >= self.min_hits or self.frame_count <= self.min_hits):
+                ret.append(np.concatenate((d,[trk.id+1])).reshape(1,-1))
             i -= 1
             # remove dead tracks
             if(trk.time_since_update > self.max_age):
@@ -334,6 +337,6 @@ class KFTracker(object):
         for trk in self.trackers:
             box = np.int0(trk.get_state())[0]
             labels = trk.get_labels()
-            track_id = trk.track_id
+            track_id = trk.id
             image = plot_one_box(box,labels,track_id,image)
         return image

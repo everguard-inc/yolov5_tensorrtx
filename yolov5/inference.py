@@ -15,6 +15,7 @@ import pycuda.driver as cuda
 import pandas as pd
 import tensorrt as trt
 from utils.kalman_tracker import KFTracker
+from tqdm import tqdm
 
 CONF_THRESH_LIST = [0.5, 0.5, 0.2, 0.5, 0.5, 0.2, 0.5, 0.5, 0.2, 0.5]
 IOU_THRESHOLD = 0.4
@@ -402,7 +403,7 @@ class YoLov5TRT(object):
         # Do nms
         boxes = self.non_max_suppression(pred, origin_h, origin_w, conf_thres_list=CONF_THRESH_LIST, nms_thres=IOU_THRESHOLD)
         result = self.predicts_to_multilabel_numpy(boxes, IOU_THRESHOLD, CONF_THRESH_LIST, 9)
-        #print('\nout = ',result)
+        #print(result)
         return result
 
 
@@ -423,19 +424,19 @@ if __name__ == "__main__":
                   'in_hardhat', 'not_in_hardhat', 'hardhat_unrecognized','crane_bucket']
     # a YoLov5TRT instance
     yolov5_wrapper = YoLov5TRT(engine_file_path)
+    video_path = 'videos_to_detect_10-27-19-20'
     try:
-        videos = os.listdir("test_videos/")
-        for video in videos:
-                print(video)
-                vidcap = cv2.VideoCapture("test_videos/" + video)
+        videos = os.listdir(video_path)
+        for video in tqdm(videos):
+                #print(video)
+                vidcap = cv2.VideoCapture(os.path.join(video_path,video))
                 img_array = []
                 success,image = vidcap.read()
                 frame = 1
                 while success:
-                    print(frame)
+                    #print(frame)
                     frame+=1
                     result,image = yolov5_wrapper.infer(image) 
-                    print('\nresult = ',result)
                     height, width, layers = image.shape
                     size = (width,height)
                     img_array.append(image)
