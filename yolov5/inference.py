@@ -138,8 +138,10 @@ class YoLov5TRT(object):
                 output[i * 6001: (i + 1) * 6001], batch_origin_h[i], batch_origin_w[i]
             )
             result = self.person_tracker.update(result)
+            image = self.person_tracker.visualize(batch_image_raw[i])
             
-        return result
+        return result,image
+
 
     def destroy(self):
         # Remove any context from the top of the context stack, deactivating it.
@@ -432,7 +434,7 @@ if __name__ == "__main__":
                 while success:
                     print(frame)
                     frame+=1
-                    result = yolov5_wrapper.infer(image) 
+                    result,image = yolov5_wrapper.infer(image) 
                     print('\nresult = ',result)
                     height, width, layers = image.shape
                     size = (width,height)
