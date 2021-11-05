@@ -143,7 +143,7 @@ class KalmanBoxTracker(object):
     This class represents the internal state of individual tracked objects observed as bbox.
     """
 
-    def __init__(self, bbox):
+    def __init__(self, bbox, track_id):
         """
         Initialises a tracker using initial bounding box.
         """
@@ -169,7 +169,7 @@ class KalmanBoxTracker(object):
 
         self.kf.x[:4] = convert_bbox_to_z(bbox)
         self.time_since_update = 0
-        #self.track_id = track_id
+        self.track_id = track_id
         self.history = []
         self.hits = 0
         self.hit_streak = 0
@@ -290,6 +290,7 @@ class KFTracker(object):
         NOTE: The number of objects returned may differ from the number of detections provided.
         """
         dets = []
+        track_id = -1
         if len(boxes) > 0:
             for box in boxes:
                 dets.append(box)
@@ -317,7 +318,8 @@ class KFTracker(object):
             persons.append([boxes[m[0]], self.trackers[m[1]].get_labels()])
         # create and initialise new trackers for unmatched detections
         for i in unmatched_dets:
-            trk = KalmanBoxTracker(dets[i])
+            track_id+=1
+            trk = KalmanBoxTracker(dets[i],track_id)
             self.trackers.append(trk)
         i = len(self.trackers)
         for trk in reversed(self.trackers):
@@ -332,5 +334,6 @@ class KFTracker(object):
         for trk in self.trackers:
             box = np.int0(trk.get_state())[0]
             labels = trk.get_labels()
-            image = plot_one_box(box,labels,image)
+            track_id = trk.track_id
+            image = plot_one_box(box,labels,track_id,image)
         return image

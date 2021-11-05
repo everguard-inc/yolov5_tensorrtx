@@ -9,7 +9,7 @@ def labels_dict_to_ints(labels : dict):
     return post_labels     
 
 
-def plot_one_box(x, labels, img, line_thickness=None):
+def plot_one_box(x, labels, track_id, img, line_thickness=None):
     """
     description: Plots one bounding box on image img,
                  this function comes from YoLov5 project.
@@ -31,11 +31,14 @@ def plot_one_box(x, labels, img, line_thickness=None):
     )  # line/font thickness
     box_color = (255,0,0)#color or [random.randint(0, 255) for _ in range(3)]
     c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
+    tf = max(tl - 1, 1)
     cv2.rectangle(img, c1, c2, box_color, thickness=tl)
+    if track_id:
+        cv2.putText(img,str(track_id),(c1[0], c1[1] + 10),0,tl / 4,box_color, thickness=tf)
     labels_space = 0
     for label in labels:
         text_color = (0,255,0) if label==0 or label==3 or label==6 else (0,0,255)
-        tf = max(tl - 1, 1)  # font thickness
+          # font thickness
         t_size = cv2.getTextSize(label_names[label], 0, fontScale=tl / 6, thickness=tf)[0]
         c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
         cv2.putText(
