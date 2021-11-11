@@ -29,7 +29,7 @@
     make
     ```
     ```
-    ./yolov5 -s best_adam.wts best_adam.trt m 
+    ./yolov5 -s cl10_bucket.wts cl10_bucket.trt m 
     ```
 
 Finally you should get best_adam.trt in build folder.
@@ -44,13 +44,13 @@ Finally you should get best_adam.trt in build folder.
 
 6. To run inference on images:
   ```
-  python3 yolov5_trt.py
+  python3 inference.py
   ```
-In yolov5_trt.py you already have trt-model path, path to folder with images:
+In yolov5_trt.py you already have trt-model path, path to folder with videos:
   ```
   PLUGIN_LIBRARY = "/app/yolov5_tensorrtx/yolov5/build/libmyplugins.so"
-  engine_file_path = "build/best_adam.trt"
-  image_dir = "build/coco_calib/"
+  engine_file_path = "build/cl10_bucket.trt"
+  video_path = "test_videos/"
   ```
 
 If you get an error of missing pycuda:

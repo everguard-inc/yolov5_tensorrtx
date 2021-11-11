@@ -12,7 +12,6 @@ import cv2
 import numpy as np
 import pycuda.autoinit
 import pycuda.driver as cuda
-import pandas as pd
 import tensorrt as trt
 from utils.kalman_tracker import KFTracker
 from tqdm import tqdm
