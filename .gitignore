@@ -6,3 +6,13 @@
 */*.trt
 *.jpg
 requirements.txt
+*.csv
+yolov5/videos_to_detect_10-27-19-20
+yolov5/utils/__pycache__
+yolov5/test_out
+yolov5/test_videos
+yolov5/build_old
+yolov5/output
+yolov5/build_adam
+yolov5/build
+yolov5/10cl_events_processed

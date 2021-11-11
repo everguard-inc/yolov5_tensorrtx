@@ -88,13 +88,15 @@ class YoLov5TRT(object):
         self.cuda_outputs = cuda_outputs
         self.bindings = bindings
         self.batch_size = engine.max_batch_size
-        self.person_tracker = KFTracker()
+        self.person_tracker = KFTracker(buffer_size=5)
 
     def reset_buffer(self):
-        self.person_tracker = KFTracker()
+        self.person_tracker = KFTracker(buffer_size=5)
 
     def infer(self, image_raw):
         threading.Thread.__init__(self)
+
+        start = time.time()
         # Make self the active context, pushing it on top of the context stack.
         self.ctx.push()
         # Restore
@@ -138,10 +140,13 @@ class YoLov5TRT(object):
             result = self.post_process(
                 output[i * 6001: (i + 1) * 6001], batch_origin_h[i], batch_origin_w[i]
             )
+            end = time.time()
+
             result = self.person_tracker.update(result)
-            image = self.person_tracker.visualize(batch_image_raw[i])
             
-        return result,image
+            image = self.person_tracker.visualize(batch_image_raw[i])
+
+        return result,image, end - start
 
 
     def destroy(self):
@@ -340,7 +345,7 @@ class YoLov5TRT(object):
                            + (bb_gt[..., 2] - bb_gt[..., 0]) * (bb_gt[..., 3] - bb_gt[..., 1]) - wh)
         return iou_matrix
 
-    def predicts_to_multilabel_numpy(self, predicts : np.ndarray, iou_th : float, conf_th_list, skip_label : int = 0) -> np.ndarray:
+    def predicts_to_multilabel_numpy(self, predicts : np.ndarray, iou_th : float, conf_th_list, skip_label : int = 100) -> np.ndarray:
         if len(predicts) == 0:
             return []
         else:
@@ -409,8 +414,8 @@ class YoLov5TRT(object):
 
 if __name__ == "__main__":
     # load custom plugin and engine
-    PLUGIN_LIBRARY = "build/libmyplugins.so"
-    engine_file_path = "build/cl10_bucket.trt"
+    PLUGIN_LIBRARY = "build_old/libmyplugins.so"
+    engine_file_path = "build_old/cl10_bucket.trt"
     if len(sys.argv) > 1:
         engine_file_path = sys.argv[1]
     if len(sys.argv) > 2:
@@ -424,19 +429,19 @@ if __name__ == "__main__":
                   'in_hardhat', 'not_in_hardhat', 'hardhat_unrecognized','crane_bucket']
     # a YoLov5TRT instance
     yolov5_wrapper = YoLov5TRT(engine_file_path)
-    video_path = 'videos_to_detect_10-27-19-20'
+    inference_time_list = []
+    video_path = 'test_videos'
     try:
         videos = os.listdir(video_path)
         for video in tqdm(videos):
-                #print(video)
                 vidcap = cv2.VideoCapture(os.path.join(video_path,video))
                 img_array = []
                 success,image = vidcap.read()
                 frame = 1
                 while success:
-                    #print(frame)
                     frame+=1
-                    result,image = yolov5_wrapper.infer(image) 
+                    result,image, inference_time = yolov5_wrapper.infer(image) 
+                    inference_time_list.append(inference_time)
                     height, width, layers = image.shape
                     size = (width,height)
                     img_array.append(image)
@@ -450,3 +455,5 @@ if __name__ == "__main__":
     finally:
         # destroy the instance
         yolov5_wrapper.destroy()
+    
+    print("\nInference fps = ",1/np.array(inference_time_list).mean())

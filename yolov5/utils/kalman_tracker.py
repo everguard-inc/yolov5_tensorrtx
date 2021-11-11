@@ -1,15 +1,68 @@
-import math
 import numpy as np
 from typing import Any, Dict, NoReturn, Optional
 from collections import Counter, deque
 import cv2
-import time
 from collections import Counter, deque
 from typing import Any, Dict, List, Optional
 from filterpy.kalman import KalmanFilter
 from scipy.optimize import linear_sum_assignment
-from .visualize import plot_one_box
+
 np.random.seed(0)
+
+
+def labels_dict_to_list(labels : dict) -> List:
+    post_labels = []
+    for _,value in labels.items():
+        if value:
+            post_labels.append(value)
+
+    return post_labels     
+
+
+def plot_one_box(x, labels, track_id, img, line_thickness=None):
+    """
+    description: Plots one bounding box on image img,
+                 this function comes from YoLov5 project.
+    param: 
+        x:      a box likes [x1,y1,x2,y2]
+        img:    a opencv image object
+        color:  color to draw rectangle, such as (0,255,0)
+        label:  str
+        line_thickness: int
+    return:
+        no return
+    """
+    label_names = ['in_harness', 'not_in_harness', 'harness_unrecognized', 'in_vest',\
+        'not_in_vest','vest_unrecognized','in_hardhat','not_in_hardhat','hardhat_unrecognized','crane_bucket']
+        
+    labels = labels_dict_to_list(labels)
+    tl = (
+        line_thickness or round(0.001 * (img.shape[0] + img.shape[1]) / 2) + 1
+    )  # line/font thickness
+    box_color = (255,0,0)#color or [random.randint(0, 255) for _ in range(3)]
+    c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
+    tf = max(tl - 1, 1)
+    cv2.rectangle(img, c1, c2, box_color, thickness=tl)
+    if track_id:
+        cv2.putText(img,str(track_id),(c1[0], c1[1] + 10),0,tl / 4,box_color, thickness=tf)
+    labels_space = 0
+    for label in labels:
+        text_color = (0,255,0) if label==0 or label==3 or label==6 else (0,0,255)
+          # font thickness
+        t_size = cv2.getTextSize(label_names[label], 0, fontScale=tl / 6, thickness=tf)[0]
+        c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
+        cv2.putText(
+            img,
+            label_names[label],
+            (c1[0], c1[1] - labels_space),
+            0,
+            tl / 4,
+            text_color,
+            thickness=tf,
+            )
+        labels_space += 20
+
+    return img
 
 
 def linear_assignment(cost_matrix):
@@ -143,12 +196,12 @@ class KalmanBoxTracker(object):
     """
     count = 0
 
-    def __init__(self, bbox, track_id):
+    def __init__(self, bbox, buffer_size):
         """
         Initialises a tracker using initial bounding box.
         """
         self.kf = KalmanFilter(dim_x=7, dim_z=4)
-        self.buffer = KFBuffer(buffer = 3)
+        self.buffer = KFBuffer(buffer = buffer_size)
         self.kf.F = np.array([[1, 0, 0, 0, 1, 0, 0],
                               [0, 1, 0, 0, 0, 1, 0],
                               [0, 0, 1, 0, 0, 0, 1],
@@ -272,7 +325,7 @@ def associate_detections_to_trackers(dets, trackers, iou_threshold=0.3):
 
 class KFTracker(object):
 
-    def __init__(self):
+    def __init__(self, buffer_size):
         """
         Sets key parameters for tracker
         """
@@ -281,6 +334,7 @@ class KFTracker(object):
         self.iou_threshold = 0.19
         self.trackers = []
         self.frame_count = 0
+        self.buffer_size = buffer_size
 
     def update(self, boxes):
         """
@@ -315,11 +369,11 @@ class KFTracker(object):
         persons = []
         for m in matched:
             self.trackers[m[1]].update(dets[m[0]])
-            persons.append([boxes[m[0]], self.trackers[m[1]].get_labels()])
+            persons.append(self.trackers[m[1]].get_labels())
         # create and initialise new trackers for unmatched detections
         for i in unmatched_dets:
             track_id+=1
-            trk = KalmanBoxTracker(dets[i],track_id)
+            trk = KalmanBoxTracker(dets[i],self.buffer_size)
             self.trackers.append(trk)
         i = len(self.trackers)
         for trk in reversed(self.trackers):
