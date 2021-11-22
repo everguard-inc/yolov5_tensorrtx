@@ -18,8 +18,14 @@ def labels_dict_to_list(labels : dict) -> List:
 
     return post_labels     
 
+def visualize_custom(image, boxes, labels_list):
+    for i, box in enumerate(boxes):
+        box = box
+        labels = labels_list[i]
+        image = plot_one_box(box,labels,image)
+    return image
 
-def plot_one_box(x, labels, track_id, img, line_thickness=None):
+def plot_one_box(x, labels, img, line_thickness=None):
     """
     description: Plots one bounding box on image img,
                  this function comes from YoLov5 project.
@@ -34,7 +40,7 @@ def plot_one_box(x, labels, track_id, img, line_thickness=None):
     """
     label_names = ['in_harness', 'not_in_harness', 'harness_unrecognized', 'in_vest',\
         'not_in_vest','vest_unrecognized','in_hardhat','not_in_hardhat','hardhat_unrecognized','crane_bucket']
-        
+
     labels = labels_dict_to_list(labels)
     tl = (
         line_thickness or round(0.001 * (img.shape[0] + img.shape[1]) / 2) + 1
@@ -43,8 +49,6 @@ def plot_one_box(x, labels, track_id, img, line_thickness=None):
     c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
     tf = max(tl - 1, 1)
     cv2.rectangle(img, c1, c2, box_color, thickness=tl)
-    if track_id:
-        cv2.putText(img,str(track_id),(c1[0], c1[1] + 10),0,tl / 4,box_color, thickness=tf)
     labels_space = 0
     for label in labels:
         text_color = (0,255,0) if label==0 or label==3 or label==6 else (0,0,255)
@@ -366,10 +370,10 @@ class KFTracker(object):
             self.trackers.pop(t)
         matched, unmatched_dets, unmatched_trks = associate_detections_to_trackers(dets, trks, self.iou_threshold)
         # update matched trackers with assigned detections
-        persons = []
+        labels = []
         for m in matched:
             self.trackers[m[1]].update(dets[m[0]])
-            persons.append(self.trackers[m[1]].get_labels())
+            labels.append(self.trackers[m[1]].get_labels())
         # create and initialise new trackers for unmatched detections
         for i in unmatched_dets:
             track_id+=1
@@ -385,12 +389,11 @@ class KFTracker(object):
             if(trk.time_since_update > self.max_age):
                 self.trackers.pop(i)
                 
-        return persons
+        return labels
 
     def visualize(self, image):
         for trk in self.trackers:
             box = np.int0(trk.get_state())[0]
             labels = trk.get_labels()
-            track_id = trk.id
-            image = plot_one_box(box,labels,track_id,image)
+            image = plot_one_box(box,labels,image)
         return image

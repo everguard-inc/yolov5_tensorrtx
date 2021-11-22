@@ -18,8 +18,8 @@ namespace Yolo
     };
     static constexpr int MAX_OUTPUT_BBOX_COUNT = 1000;
     static constexpr int CLASS_NUM = 10;
-    static constexpr int INPUT_H = 736;  // yolov5's input height and width must be divisible by 32.
-    static constexpr int INPUT_W = 736;
+    static constexpr int INPUT_H = 640;  // yolov5's input height and width must be divisible by 32.
+    static constexpr int INPUT_W = 1088;
 
     static constexpr int LOCATIONS = 4;
     struct alignas(float) Detection {

@@ -14,10 +14,14 @@ import pycuda.autoinit
 import pycuda.driver as cuda
 import tensorrt as trt
 from utils.kalman_tracker import KFTracker
+from utils.box_merger import predicts_to_multilabel_numpy
 from tqdm import tqdm
+import joblib
+from copy import deepcopy
 
-CONF_THRESH_LIST = [0.5, 0.5, 0.2, 0.5, 0.5, 0.2, 0.5, 0.5, 0.2, 0.5]
-IOU_THRESHOLD = 0.4
+CONF_THRESH_LIST = [0.4, 0.4, 0.2, 0.4, 0.4, 0.2, 0.4, 0.4, 0.2, 0.4]
+IOU_THRESHOLD = 0.45
+in_bucket_classification_model = joblib.load('utils/rf_model.joblib')
 
 
 
@@ -87,10 +91,10 @@ class YoLov5TRT(object):
         self.cuda_outputs = cuda_outputs
         self.bindings = bindings
         self.batch_size = engine.max_batch_size
-        self.person_tracker = KFTracker(buffer_size=5)
+        self.person_tracker = KFTracker(buffer_size=1)
 
     def reset_buffer(self):
-        self.person_tracker = KFTracker(buffer_size=5)
+        self.person_tracker = KFTracker(buffer_size=1)
 
     def infer(self, image_raw):
         threading.Thread.__init__(self)
@@ -212,6 +216,7 @@ class YoLov5TRT(object):
         image = np.expand_dims(image, axis=0)
         # Convert the image to row-major order, also known as "C order":
         image = np.ascontiguousarray(image)
+        
         return image, image_raw, h, w
 
     def xywh2xyxy(self, origin_h, origin_w, x):
@@ -330,63 +335,6 @@ class YoLov5TRT(object):
         boxes = np.stack(keep_boxes, 0) if len(keep_boxes) else np.array([])
         return boxes
 
-    def iou_batch_numpy(self, bb_test, bb_gt):
-        bb_gt = np.expand_dims(bb_gt, 0)
-        bb_test = np.expand_dims(bb_test, 1)
-        xx1 = np.maximum(bb_test[..., 0], bb_gt[..., 0])
-        yy1 = np.maximum(bb_test[..., 1], bb_gt[..., 1])
-        xx2 = np.minimum(bb_test[..., 2], bb_gt[..., 2])
-        yy2 = np.minimum(bb_test[..., 3], bb_gt[..., 3])
-        w = np.maximum(0, xx2 - xx1)
-        h = np.maximum(0, yy2 - yy1)
-        wh = w * h
-        iou_matrix = wh / ((bb_test[..., 2] - bb_test[..., 0]) * (bb_test[..., 3] - bb_test[..., 1])
-                           + (bb_gt[..., 2] - bb_gt[..., 0]) * (bb_gt[..., 3] - bb_gt[..., 1]) - wh)
-        return iou_matrix
-
-    def predicts_to_multilabel_numpy(self, predicts : np.ndarray, iou_th : float, conf_th_list, skip_label : int = 100) -> np.ndarray:
-        if len(predicts) == 0:
-            return []
-        else:
-            filtered_predicts = []
-            for pred in predicts:
-                conf_th = conf_th_list[int(pred[-1])]
-                if pred[-2]>=conf_th:
-                    filtered_predicts.append(pred)
-            predicts = np.array(filtered_predicts).astype(int)
-            if len(predicts) == 0:
-                return 0
-            extra_predicts = predicts[(predicts[...,-1]==skip_label).nonzero()[0]].astype(int)
-            predicts = predicts[(predicts[...,-1]!=skip_label).nonzero()[0]].astype(int)
-            iou_matrix = self.iou_batch_numpy(predicts,predicts)
-            iou_matrix = np.triu(iou_matrix,0)
-            matched_indices = np.c_[(iou_matrix>iou_th).nonzero()]
-            new_matched_indices = []
-            for ids in range(len(matched_indices)):
-                if len(new_matched_indices)==0:
-                    new_matched_indices.append(list(set(matched_indices[ids])))
-                else:
-                    exist_flag = False
-                    for exist_index, exist_el in enumerate(new_matched_indices):
-                        if matched_indices[ids][0] in exist_el or matched_indices[ids][1] in exist_el:
-                            new_unique = list(set(exist_el+list(matched_indices[ids])))
-                            new_matched_indices[exist_index] = new_unique
-                            exist_flag = True
-                            break  
-                    if not exist_flag:
-                        new_matched_indices.append(list(set(matched_indices[ids])))
-            new_predicts = []
-            for ids in new_matched_indices:
-                new_pr = predicts[ids]
-                new_pr = np.concatenate((new_pr[0][:4],new_pr[:,5]))
-                new_predicts.append(new_pr)
-            for pred in extra_predicts:
-                temp = []
-                for i,el in enumerate(pred):
-                    if i!=4:
-                        temp.append(el)
-                new_predicts.append(np.array(temp))
-            return new_predicts
 
     def post_process(self, output, origin_h, origin_w):
         """
@@ -406,15 +354,15 @@ class YoLov5TRT(object):
         pred = np.reshape(output[1:], (-1, 6))[:num, :]
         # Do nms
         boxes = self.non_max_suppression(pred, origin_h, origin_w, conf_thres_list=CONF_THRESH_LIST, nms_thres=IOU_THRESHOLD)
-        result = self.predicts_to_multilabel_numpy(boxes, IOU_THRESHOLD, CONF_THRESH_LIST, 9)
+        result = predicts_to_multilabel_numpy(in_bucket_classification_model,boxes,0.45,CONF_THRESH_LIST)
         #print(result)
         return result
 
 
 if __name__ == "__main__":
     # load custom plugin and engine
-    PLUGIN_LIBRARY = "build_old/libmyplugins.so"
-    engine_file_path = "build_old/cl10_bucket.trt"
+    PLUGIN_LIBRARY = "build/libmyplugins.so"
+    engine_file_path = "build/cl10_bucket.trt"
     if len(sys.argv) > 1:
         engine_file_path = sys.argv[1]
     if len(sys.argv) > 2:
